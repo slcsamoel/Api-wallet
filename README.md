@@ -77,6 +77,8 @@ php artisan serve
 
 A API estará acessível em http://localhost:8000.
 
+A Documentação esta disponeivel na rota http://localhost:8000/api/documentation
+
 🌍 Endpoints da API
 Todos os endpoints retornam respostas em formato JSON.
 

@@ -11,10 +11,66 @@ use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Log;
 use App\Models\User;
 
+/**
+ * @OA\Schema(
+ * schema="Transaction",
+ * title="Transação Financeira",
+ * description="Detalhes de uma transação de depósito ou transferência.",
+ * @OA\Property(property="id", type="integer", example=1),
+ * @OA\Property(property="type", type="string", enum={"Depósito", "Envio de Transferência", "Recebimento de Transferência", "Reversão de Depósito", "Reversão de Transferência Enviada", "Reversão de Transferência Recebida"}, example="Depósito"),
+ * @OA\Property(property="amount", type="string", format="float", example="100.00"),
+ * @OA\Property(property="status", type="string", enum={"completed", "failed", "reversed"}, example="completed"),
+ * @OA\Property(property="description", type="string", example="Depósito de salário"),
+ * @OA\Property(property="date", type="string", format="date-time", example="2025-07-04T18:20:27.000000Z"),
+ * @OA\Property(property="other_party_name", type="string", example="Sistema"),
+ * @OA\Property(property="direction", type="string", enum={"Entrada", "Saída"}, example="Entrada")
+ * )
+ */
+
 class TransactionController extends Controller
 {
     /**
-     * Realiza um depósito na carteira do usuário.
+     * @OA\Post(
+     * path="/api/deposit",
+     * summary="Realizar um depósito na carteira do usuário",
+     * tags={"Transações"},
+     * security={{"bearerAuth":{}}},
+     * @OA\RequestBody(
+     * required=true,
+     * @OA\JsonContent(
+     * @OA\Property(property="amount", type="number", format="float", example=100.50),
+     * @OA\Property(property="description", type="string", example="Depósito de salário", nullable=true)
+     * )
+     * ),
+     * @OA\Response(
+     * response=200,
+     * description="Depósito realizado com sucesso!",
+     * @OA\JsonContent(
+     * @OA\Property(property="message", type="string", example="Depósito realizado com sucesso!"),
+     * @OA\Property(property="new_balance", type="string", format="float", example="223.95")
+     * )
+     * ),
+     * @OA\Response(
+     * response=401,
+     * description="Não autenticado",
+     * @OA\JsonContent(ref="#/components/schemas/UnauthorizedError")
+     * ),
+     * @OA\Response(
+     * response=422,
+     * description="Dados de validação inválidos",
+     * @OA\JsonContent(ref="#/components/schemas/ValidationError")
+     * ),
+     * @OA\Response(
+     * response=403,
+     * description="Ação proibida (carteira com inconsistência)",
+     * @OA\JsonContent(ref="#/components/schemas/ForbiddenError")
+     * ),
+     * @OA\Response(
+     * response=500,
+     * description="Erro interno do servidor",
+     * @OA\JsonContent(ref="#/components/schemas/InternalServerError")
+     * )
+     * )
      */
     public function deposit(Request $request)
     {
@@ -63,7 +119,48 @@ class TransactionController extends Controller
     }
 
     /**
-     * Realiza uma transferência de dinheiro para outro usuário.
+     * @OA\Post(
+     * path="/api/transfer",
+     * summary="Realizar uma transferência para outro usuário",
+     * tags={"Transações"},
+     * security={{"bearerAuth":{}}},
+     * @OA\RequestBody(
+     * required=true,
+     * @OA\JsonContent(
+     * @OA\Property(property="to_user_email", type="string", format="email", example="destino@example.com"),
+     * @OA\Property(property="amount", type="number", format="float", example=50.00),
+     * @OA\Property(property="description", type="string", example="Pagamento de conta", nullable=true)
+     * )
+     * ),
+     * @OA\Response(
+     * response=200,
+     * description="Transferência realizada com sucesso!",
+     * @OA\JsonContent(
+     * @OA\Property(property="message", type="string", example="Transferência realizada com sucesso!"),
+     * @OA\Property(property="your_new_balance", type="string", format="float", example="173.95")
+     * )
+     * ),
+     * @OA\Response(
+     * response=401,
+     * description="Não autenticado",
+     * @OA\JsonContent(ref="#/components/schemas/UnauthorizedError")
+     * ),
+     * @OA\Response(
+     * response=422,
+     * description="Dados de validação inválidos",
+     * @OA\JsonContent(ref="#/components/schemas/ValidationError")
+     * ),
+     * @OA\Response(
+     * response=403,
+     * description="Ação proibida (carteira de destino com inconsistência)",
+     * @OA\JsonContent(ref="#/components/schemas/ForbiddenError")
+     * ),
+     * @OA\Response(
+     * response=500,
+     * description="Erro interno do servidor",
+     * @OA\JsonContent(ref="#/components/schemas/InternalServerError")
+     * )
+     * )
      */
     public function transfer(Request $request)
     {
@@ -81,21 +178,25 @@ class TransactionController extends Controller
 
         // Não permitir transferência para si mesmo
         if ($fromWallet->id === $toWallet->id) {
-            throw ValidationException::withMessages([
-                'to_user_email' => 'Não é possível transferir para sua própria carteira.'
-            ]);
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Não é possível transferir para sua própria carteira.'
+            ], 403);
         }
 
         // Regra: Um usuário deve ter saldo suficiente antes de fazer uma transferência.
         if ($fromWallet->balance < $amount) {
-            throw ValidationException::withMessages([
-                'amount' => 'Saldo insuficiente para a transferência.'
-            ]);
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Saldo insuficiente para a transferência.'
+            ], 403);
         }
 
         // Regra: Se a carteira de destino estiver com a flag negativa, não permitir receber.
         if ($toWallet->is_negative) {
             return response()->json([
+                'status' => 'error',
                 'message' => 'Não é possível transferir para este usuário. A carteira dele está com uma inconsistência.'
             ], 403);
         }
@@ -123,6 +224,7 @@ class TransactionController extends Controller
             DB::commit();
 
             return response()->json([
+                'status' => 'success',
                 'message' => 'Transferência realizada com sucesso!',
                 'your_new_balance' => $fromWallet->balance,
             ], 200);
@@ -136,7 +238,25 @@ class TransactionController extends Controller
     }
 
     /**
-     * Lista as transações do usuário autenticado.
+     * @OA\Get(
+     * path="/api/transactions",
+     * summary="Listar histórico de transações do usuário autenticado",
+     * tags={"Transações"},
+     * security={{"bearerAuth":{}}},
+     * @OA\Response(
+     * response=200,
+     * description="Histórico de transações recuperado com sucesso!",
+     * @OA\JsonContent(
+     * type="array",
+     * @OA\Items(ref="#/components/schemas/Transaction")
+     * )
+     * ),
+     * @OA\Response(
+     * response=401,
+     * description="Não autenticado",
+     * @OA\JsonContent(ref="#/components/schemas/UnauthorizedError")
+     * )
+     * )
      */
     public function index(Request $request)
     {
@@ -175,7 +295,7 @@ class TransactionController extends Controller
                 } elseif ($transaction->type === 'reversal_transfer_in') {
                     $typeDisplay = 'Reversão de Transferência Recebida';
                 }
-                // Para reversões, podemos tentar identificar a transação original se houver um relacionamento
+                // Para transações de reversão, o outro partido é a transação original
                 $otherPartyName = $transaction->reversal ? 'Reversão da Transação #' . $transaction->reversal->transaction_id : null;
             }
 
@@ -189,8 +309,8 @@ class TransactionController extends Controller
                 'date' => $transaction->created_at->toDateTimeString(),
                 'from_user' => $transaction->fromWallet->user->name ?? ($transaction->type === 'deposit' ? 'Sistema' : null),
                 'to_user' => $transaction->toWallet->user->name ?? null,
-                'other_party' => $otherPartyName, // Adiciona quem foi o outro envolvido na transação
-                'direction' => $isIncoming ? 'Entrada' : 'Saída', // Indica se é entrada ou saída para a carteira do usuário
+                'other_party' => $otherPartyName,
+                'direction' => $isIncoming ? 'Entrada' : 'Saída',
             ];
         });
 
@@ -199,18 +319,67 @@ class TransactionController extends Controller
 
 
     /**
-     * Reverte uma transação específica.
-     * Esta é uma função sensível e deve ter controle de acesso rigoroso (e.g., admin only).
+     * @OA\Post(
+     * path="/api/transactions/{id}/reverse",
+     * summary="Reverter uma transação (depósito ou transferência)",
+     * tags={"Transações"},
+     * security={{"bearerAuth":{}}},
+     * @OA\Parameter(
+     * name="id",
+     * in="path",
+     * required=true,
+     * description="ID da transação a ser revertida",
+     * @OA\Schema(
+     * type="integer",
+     * format="int64",
+     * example=1
+     * )
+     * ),
+     * @OA\RequestBody(
+     * required=false,
+     * @OA\JsonContent(
+     * @OA\Property(property="reason", type="string", example="Erro de digitação no valor.", nullable=true)
+     * )
+     * ),
+     * @OA\Response(
+     * response=200,
+     * description="Transação revertida com sucesso!",
+     * @OA\JsonContent(
+     * @OA\Property(property="message", type="string", example="Transação #1 revertida com sucesso!"),
+     * @OA\Property(property="original_transaction_status", type="string", example="reversed")
+     * )
+     * ),
+     * @OA\Response(
+     * response=400,
+     * description="Requisição inválida (transação já revertida, falhou ou tipo não suportado)",
+     * @OA\JsonContent(ref="#/components/schemas/ForbiddenError")
+     * ),
+     * @OA\Response(
+     * response=401,
+     * description="Não autenticado",
+     * @OA\JsonContent(ref="#/components/schemas/UnauthorizedError")
+     * ),
+     * @OA\Response(
+     * response=422,
+     * description="Dados de validação inválidos",
+     * @OA\JsonContent(ref="#/components/schemas/ValidationError")
+     * ),
+     * @OA\Response(
+     * response=500,
+     * description="Erro interno do servidor (ex: saldo insuficiente para reversão)",
+     * @OA\JsonContent(ref="#/components/schemas/InternalServerError")
+     * )
+     * )
      */
     public function reverse(Request $request, Transaction $transaction)
     {
-        // Validação básica: verificar se a transação já foi revertida
+        // verificar se a transação já foi revertida
         if ($transaction->status === 'reversed') {
-            return response()->json(['message' => 'Esta transação já foi revertida.'], 400);
+            return response()->json(['status' => 'error', 'message' => 'Esta transação já foi revertida.'], 400);
         }
-        // Validação: Não permitir reverter transações que já falharam
+        // Não permitir reverter transações que já falharam
         if ($transaction->status === 'failed') {
-            return response()->json(['message' => 'Transações falhas não podem ser revertidas.'], 400);
+            return response()->json(['status' => 'error', 'message' => 'Transações falhas não podem ser revertidas.'], 400);
         }
 
         $request->validate([
@@ -233,14 +402,15 @@ class TransactionController extends Controller
                 $toWallet->save();
                 $reversalType = 'reversal_deposit';
             } elseif ($transaction->type === 'transfer') {
+
                 // Reverter transferência:
-                // 1. Reverter débito da origem (creditar na origem)
-                if ($fromWallet) { // fromWallet pode ser null para depósitos
+                // Reverter débito da origem (creditar na origem)
+                if ($fromWallet) {
                     $fromWallet->balance += $amount;
                     $fromWallet->save();
                 }
 
-                // 2. Reverter crédito do destino (debitar do destino)
+                //Reverter crédito do destino (debitar do destino)
                 if ($toWallet->balance < $amount) {
                     throw new \Exception('Saldo insuficiente para reverter o crédito na carteira de destino.');
                 }
@@ -248,17 +418,20 @@ class TransactionController extends Controller
                 $toWallet->save();
 
                 // Cria duas transações de reversão: uma para a saída e outra para a entrada
+                // A carteira que recebeu está agora 'enviando' de volta
                 Transaction::create([
-                    'from_wallet_id' => $toWallet->id, // A carteira que recebeu está agora 'enviando' de volta
-                    'to_wallet_id' => $fromWallet ? $fromWallet->id : null, // A carteira que enviou está agora 'recebendo' de volta
+                    'from_wallet_id' => $toWallet->id,
+                    'to_wallet_id' => $fromWallet ? $fromWallet->id : null,
                     'amount' => $amount,
                     'type' => 'reversal_transfer_out',
                     'status' => 'completed',
                     'description' => 'Reversão de transferência #' . $transaction->id . ' (débito do recebedor)',
                 ]);
+
+                // A carteira que enviou está agora 'recebendo' de volta
                 Transaction::create([
-                    'from_wallet_id' => $fromWallet ? $fromWallet->id : null, // A carteira que enviou está agora 'recebendo' de volta
-                    'to_wallet_id' => $toWallet->id, // A carteira que recebeu está agora 'enviando' de volta
+                    'from_wallet_id' => $fromWallet ? $fromWallet->id : null,
+                    'to_wallet_id' => $toWallet->id,
                     'amount' => $amount,
                     'type' => 'reversal_transfer_in',
                     'status' => 'completed',
@@ -266,17 +439,17 @@ class TransactionController extends Controller
                 ]);
             } else {
                 DB::rollBack();
-                return response()->json(['message' => 'Tipo de transação não suportado para reversão.'], 400);
+                return response()->json(['status' => 'error', 'message' => 'Tipo de transação não suportado para reversão.'], 400);
             }
 
             // Marcar a transação original como revertida
             $transaction->status = 'reversed';
             $transaction->save();
 
-            // Registrar a reversão
+            // Registrar a reversão com usuário que solicitou a reversão
             Reversal::create([
                 'transaction_id' => $transaction->id,
-                'reversed_by_user_id' => $request->user()->id, // O usuário que solicitou a reversão
+                'reversed_by_user_id' => $request->user()->id,
                 'reason' => $request->reason,
             ]);
 
@@ -287,9 +460,11 @@ class TransactionController extends Controller
                 'original_transaction_status' => $transaction->status,
             ], 200);
         } catch (\Exception $e) {
+
             DB::rollBack();
             Log::error('Erro ao reverter transação ' . $transaction->id . ': ' . $e->getMessage());
             return response()->json([
+                'status' => 'error',
                 'message' => 'Ocorreu um erro ao reverter a transação: ' . $e->getMessage()
             ], 500);
         }
