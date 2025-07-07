@@ -79,6 +79,7 @@ class AuthController extends Controller
         $token = $user->createToken('api-token')->plainTextToken;
 
         return response()->json([
+            'status' => 'success',
             'message' => 'Usuário registrado e carteira criada com sucesso!',
             'user' => $user,
             'token' => $token,
@@ -124,15 +125,15 @@ class AuthController extends Controller
         $user = User::where('email', $request->email)->first();
 
         if (! $user || ! Hash::check($request->password, $user->password)) {
-            throw ValidationException::withMessages([
-                'email' => ['Credenciais fornecidas estão incorretas.'],
-            ]);
+
+            return response()->json(['status' => 'error', 'message' => 'Credenciais fornecidas estão incorretas.'], 422);
         }
 
         $user->tokens()->delete(); // Revoga tokens antigos
         $token = $user->createToken('api-token')->plainTextToken;
 
         return response()->json([
+            'status' => 'success',
             'message' => 'Login realizado com sucesso!',
             'user' => $user,
             'token' => $token,
@@ -164,6 +165,7 @@ class AuthController extends Controller
         $request->user()->currentAccessToken()->delete();
 
         return response()->json([
+            'status' => 'success',
             'message' => 'Logout realizado com sucesso!'
         ], 200);
     }

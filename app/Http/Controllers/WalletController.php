@@ -79,10 +79,11 @@ class WalletController extends Controller
         $wallet = $request->user()->wallet;
 
         if (!$wallet) {
-            return response()->json(['message' => 'Carteira não encontrada para este usuário.'], 404);
+            return response()->json(['status' => 'error', 'message' => 'Carteira não encontrada para este usuário.'], 404);
         }
 
         return response()->json([
+            'status' => 'success',
             'user_name' => $request->user()->name,
             'wallet_id' => $wallet->id,
             'balance' => $wallet->balance,
